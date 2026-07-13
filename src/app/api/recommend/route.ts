@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recommendSongs } from "@/lib/gemini";
 
+export const maxDuration = 60;
+
 async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   for (let i = 0; i <= retries; i++) {
     try {
