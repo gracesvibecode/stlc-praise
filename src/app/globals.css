@@ -111,3 +111,13 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+
+@media (min-width: 768px) {
+  .md-hidden-overlay {
+    display: none !important;
+  }
+  aside {
+    position: relative !important;
+    left: 0 !important;
+  }
+}

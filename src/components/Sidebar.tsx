@@ -14,6 +14,8 @@ interface SidebarProps {
   user: User;
   sessions: Session[];
   currentSessionId: string | null;
+  isOpen: boolean;
+  onToggle: () => void;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
@@ -23,6 +25,8 @@ export default function Sidebar({
   user,
   sessions,
   currentSessionId,
+  isOpen,
+  onToggle,
   onSelectSession,
   onNewSession,
   onDeleteSession,
@@ -34,21 +38,49 @@ export default function Sidebar({
     window.location.href = "/login";
   };
 
+  const handleSelectSession = (id: string) => {
+    onSelectSession(id);
+    if (window.innerWidth < 768) onToggle();
+  };
+
+  const handleNewSession = () => {
+    onNewSession();
+    if (window.innerWidth < 768) onToggle();
+  };
+
   return (
-    <aside
-      style={{
-        width: "280px",
-        minWidth: "280px",
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        borderRight: "1px solid var(--border)",
-        background: "var(--bg-card)",
-      }}
-    >
+    <>
+      {isOpen && (
+        <div
+          onClick={onToggle}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 40,
+          }}
+          className="md-hidden-overlay"
+        />
+      )}
+      <aside
+        style={{
+          width: "280px",
+          minWidth: "280px",
+          height: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          borderRight: "1px solid var(--border)",
+          background: "var(--bg-card)",
+          position: "fixed",
+          left: isOpen ? 0 : "-280px",
+          top: 0,
+          zIndex: 50,
+          transition: "left 0.3s ease",
+        }}
+      >
       <div style={{ padding: "1rem", borderBottom: "1px solid var(--border)" }}>
         <button
-          onClick={onNewSession}
+          onClick={handleNewSession}
           style={{
             width: "100%",
             padding: "0.625rem 1rem",
@@ -96,7 +128,7 @@ export default function Sidebar({
             }}
           >
             <button
-              onClick={() => onSelectSession(session.id)}
+              onClick={() => handleSelectSession(session.id)}
               style={{
                 flex: 1,
                 textAlign: "left",
@@ -214,5 +246,6 @@ export default function Sidebar({
         </button>
       </div>
     </aside>
+    </>
   );
 }

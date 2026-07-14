@@ -107,6 +107,7 @@ export default function Home() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [appState, setAppState] = useState<AppState>("welcome");
   const [messages, setMessages] = useState<Message[]>([]);
   const [songs, setSongs] = useState<Song[]>([]);
@@ -394,13 +395,15 @@ export default function Home() {
         user={user}
         sessions={sessions}
         currentSessionId={currentSessionId}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
       />
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <Header onReset={handleNewSession} />
+        <Header onReset={handleNewSession} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
         {appState === "welcome" && (
           <WelcomeScreen onSubmit={handleInitialSubmit} isLoading={isLoading} />
@@ -522,28 +525,39 @@ export default function Home() {
   );
 }
 
-function Header({ onReset }: { onReset: () => void }) {
+function Header({ onReset, onToggleSidebar }: { onReset: () => void; onToggleSidebar: () => void }) {
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/80 backdrop-blur-sm">
       <div className="max-w-3xl mx-auto flex items-center justify-between px-4 h-14">
-        <button
-          onClick={onReset}
-          className="flex items-center gap-2 text-text hover:text-primary transition-colors"
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onToggleSidebar}
+            className="text-text hover:text-primary transition-colors p-1"
+            title="상담 세션"
           >
-            <path d="M9 18V5l12-2v13" />
-            <circle cx="6" cy="18" r="3" />
-            <circle cx="18" cy="16" r="3" />
-          </svg>
-          <span className="font-semibold text-sm">STLC 찬양</span>
-        </button>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 12h18M3 6h18M3 18h18" />
+            </svg>
+          </button>
+          <button
+            onClick={onReset}
+            className="flex items-center gap-2 text-text hover:text-primary transition-colors"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="16" r="3" />
+            </svg>
+            <span className="font-semibold text-sm">STLC 찬양</span>
+          </button>
+        </div>
         <button
           onClick={onReset}
           className="text-xs px-3 py-1.5 rounded-lg border border-border text-text-muted hover:text-text hover:border-text-muted transition-colors"
