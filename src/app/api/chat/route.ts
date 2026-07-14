@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatSwap } from "@/lib/gemini";
+import { searchSongs, formatRAGContext } from "@/lib/rag";
+import { getUser } from "@/lib/auth";
 
 export const maxDuration = 60;
 
@@ -30,7 +32,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await withRetry(() => chatSwap(currentSongs, message));
+    let ragContext = "";
+    try {
+      const user = await getUser();
+      const relevant = await searchSongs(message, 10, 0.3, user?.id);
+      ragContext = formatRAGContext(relevant);
+    } catch {
+      // RAG 검색 실패 시 컨텍스트 없이 진행
+    }
+
+    const result = await withRetry(() => chatSwap(currentSongs, message, ragContext));
     return NextResponse.json(result);
   } catch (e: unknown) {
     const status = (e as { status?: number }).status;

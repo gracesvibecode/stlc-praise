@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recommendSongs } from "@/lib/gemini";
+import { searchSongs, formatRAGContext } from "@/lib/rag";
+import { getUser } from "@/lib/auth";
 
 export const maxDuration = 60;
 
@@ -30,7 +32,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await withRetry(() => recommendSongs(prompt, songCount));
+    let ragContext = "";
+    try {
+      const user = await getUser();
+      const relevant = await searchSongs(prompt, 15, 0.3, user?.id);
+      ragContext = formatRAGContext(relevant);
+    } catch {
+      // RAG 검색 실패 시 컨텍스트 없이 진행
+    }
+
+    const result = await withRetry(() => recommendSongs(prompt, songCount, ragContext));
     const songs = result.songs.map(
       (s: Record<string, unknown>, i: number) => ({
         id: String(i + 1),

@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { type User } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase-browser";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
 import SongCard, { type Song } from "@/components/SongCard";
+import Sidebar, { type Session } from "@/components/Sidebar";
 
 interface Message {
   id: string;
@@ -16,30 +19,94 @@ interface Message {
 type AppState = "welcome" | "chat" | "confirmed";
 
 function processChatResponse(
-  data: { action: string; message: string; swapIndex?: number; newSong?: Omit<Song, "id">; newSongs?: Omit<Song, "id">[] },
+  data: {
+    action: string;
+    message: string;
+    swapIndex?: number;
+    newSong?: Omit<Song, "id">;
+    newSongs?: Omit<Song, "id">[];
+  },
   currentSongs: Song[],
   setSongs: (songs: Song[]) => void
 ): Message {
-  if (data.action === "swap" && data.swapIndex != null && data.swapIndex >= 0 && data.newSong) {
+  if (
+    data.action === "swap" &&
+    data.swapIndex != null &&
+    data.swapIndex >= 0 &&
+    data.newSong
+  ) {
     const newSongs = [...currentSongs];
-    newSongs[data.swapIndex] = { id: crypto.randomUUID(), ...data.newSong } as Song;
+    newSongs[data.swapIndex] = {
+      id: crypto.randomUUID(),
+      ...data.newSong,
+    } as Song;
     setSongs(newSongs);
-    return { id: crypto.randomUUID(), role: "assistant", content: data.message, songs: newSongs };
+    return {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: data.message,
+      songs: newSongs,
+    };
   }
 
   if (data.action === "recommend" && data.newSongs?.length) {
-    const recommended: Song[] = data.newSongs.map((s, i) => ({
-      id: String(Date.now()) + i,
-      ...s,
-    } as Song));
+    const recommended: Song[] = data.newSongs.map(
+      (s, i) => ({ id: String(Date.now()) + i, ...s }) as Song
+    );
     setSongs(recommended);
-    return { id: crypto.randomUUID(), role: "assistant", content: data.message, songs: recommended };
+    return {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: data.message,
+      songs: recommended,
+    };
   }
 
   return { id: crypto.randomUUID(), role: "assistant", content: data.message };
 }
 
+async function saveMessage(
+  sessionId: string,
+  role: string,
+  content: string,
+  songs?: Song[]
+) {
+  await fetch(`/api/sessions/${sessionId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      role,
+      content,
+      songs_json: songs ?? null,
+    }),
+  });
+}
+
+async function generateAndSetTitle(sessionId: string, prompt: string, setSessions: React.Dispatch<React.SetStateAction<Session[]>>) {
+  try {
+    const res = await fetch("/api/sessions/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, prompt }),
+    });
+    if (res.ok) {
+      const { title } = await res.json();
+      if (title) {
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? { ...s, title } : s))
+        );
+      }
+    }
+  } catch { /* ignore */ }
+}
+
 export default function Home() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
   const [appState, setAppState] = useState<AppState>("welcome");
   const [messages, setMessages] = useState<Message[]>([]);
   const [songs, setSongs] = useState<Song[]>([]);
@@ -48,24 +115,115 @@ export default function Home() {
   const [setlistId, setSetlistId] = useState<string | null>(null);
   const [initialPrompt, setInitialPrompt] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const supabase = createClient();
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user: u } }) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+  }, [supabase.auth]);
+
+  const loadSessions = useCallback(async () => {
+    const res = await fetch("/api/sessions");
+    const data = await res.json();
+    setSessions(data.sessions ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (user) loadSessions();
+  }, [user, loadSessions]);
+
+  const handleNewSession = () => {
+    setCurrentSessionId(null);
+    setAppState("welcome");
+    setMessages([]);
+    setSongs([]);
+    setSetlistId(null);
+    setInitialPrompt("");
+  };
+
+  const handleSelectSession = async (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    setIsLoading(true);
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/messages`);
+      const data = await res.json();
+      const loaded: Message[] = (data.messages ?? []).map(
+        (m: { id: string; role: "user" | "assistant"; content: string; songs_json?: Song[] }) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          songs: m.songs_json ?? undefined,
+        })
+      );
+      setMessages(loaded);
+
+      const lastWithSongs = [...loaded].reverse().find((m) => m.songs?.length);
+      if (lastWithSongs?.songs) {
+        setSongs(lastWithSongs.songs);
+      } else {
+        setSongs([]);
+      }
+
+      setAppState(loaded.length > 0 ? "chat" : "welcome");
+    } catch {
+      setMessages([]);
+      setSongs([]);
+      setAppState("welcome");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (currentSessionId === sessionId) handleNewSession();
+  };
+
+  const ensureSession = async (prompt: string): Promise<string> => {
+    if (currentSessionId) return currentSessionId;
+
+    const shortTitle = prompt.length > 30 ? prompt.slice(0, 30) + "..." : prompt;
+
+    const res = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: shortTitle }),
+    });
+    const session = await res.json();
+    setCurrentSessionId(session.id);
+    setSessions((prev) => [session, ...prev]);
+
+    generateAndSetTitle(session.id, prompt, setSessions);
+
+    return session.id;
+  };
+
   const handleInitialSubmit = async (prompt: string, songCount: number) => {
     setIsLoading(true);
     setAppState("chat");
-
     setInitialPrompt(prompt);
+
+    const userContent = `${prompt}\n\n추천곡 수: ${songCount}곡`;
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: `${prompt}\n\n추천곡 수: ${songCount}곡`,
+      content: userContent,
     };
     setMessages([userMsg]);
 
     try {
+      const sessionId = await ensureSession(prompt);
+
+      await saveMessage(sessionId, "user", userContent);
+
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -78,13 +236,16 @@ export default function Home() {
       const recommended: Song[] = data.songs;
       setSongs(recommended);
 
+      const aiContent = `말씀하신 조건에 맞춰 ${recommended.length}곡을 추천드립니다. 교체를 원하시면 곡 카드의 '교체' 버튼을 누르거나 채팅으로 요청해주세요.`;
       const aiMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `말씀하신 조건에 맞춰 ${recommended.length}곡을 추천드립니다. 교체를 원하시면 곡 카드의 '교체' 버튼을 누르거나 채팅으로 요청해주세요.`,
+        content: aiContent,
         songs: recommended,
       };
       setMessages((prev) => [...prev, aiMsg]);
+
+      await saveMessage(sessionId, "assistant", aiContent, recommended);
     } catch {
       const errMsg: Message = {
         id: crypto.randomUUID(),
@@ -98,21 +259,27 @@ export default function Home() {
   };
 
   const handleSwapRequest = async (index: number) => {
+    const content = `${index + 1}번 곡 "${songs[index].title}"을 다른 곡으로 교체해주세요.`;
     const msg: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: `${index + 1}번 곡 "${songs[index].title}"을 다른 곡으로 교체해주세요.`,
+      content,
     };
     setMessages((prev) => [...prev, msg]);
     setIsLoading(true);
 
     try {
+      if (currentSessionId) await saveMessage(currentSessionId, "user", content);
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          currentSongs: songs.map((s) => ({ title: s.title, composer: s.composer })),
-          message: `${index + 1}번 곡 "${songs[index].title}"을 다른 곡으로 교체해주세요.`,
+          currentSongs: songs.map((s) => ({
+            title: s.title,
+            composer: s.composer,
+          })),
+          message: content,
         }),
       });
 
@@ -121,6 +288,9 @@ export default function Home() {
       const data = await res.json();
       const aiMsg = processChatResponse(data, songs, setSongs);
       setMessages((prev) => [...prev, aiMsg]);
+
+      if (currentSessionId)
+        await saveMessage(currentSessionId, "assistant", aiMsg.content, aiMsg.songs);
     } catch {
       const errMsg: Message = {
         id: crypto.randomUUID(),
@@ -143,11 +313,16 @@ export default function Home() {
     setIsLoading(true);
 
     try {
+      if (currentSessionId) await saveMessage(currentSessionId, "user", message);
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          currentSongs: songs.map((s) => ({ title: s.title, composer: s.composer })),
+          currentSongs: songs.map((s) => ({
+            title: s.title,
+            composer: s.composer,
+          })),
           message,
         }),
       });
@@ -157,6 +332,9 @@ export default function Home() {
       const data = await res.json();
       const aiMsg = processChatResponse(data, songs, setSongs);
       setMessages((prev) => [...prev, aiMsg]);
+
+      if (currentSessionId)
+        await saveMessage(currentSessionId, "assistant", aiMsg.content, aiMsg.songs);
     } catch {
       const errMsg: Message = {
         id: crypto.randomUUID(),
@@ -188,125 +366,158 @@ export default function Home() {
     }
   };
 
-  const handleReset = () => {
-    setAppState("welcome");
-    setMessages([]);
-    setSongs([]);
-    setSetlistId(null);
-    setInitialPrompt("");
-  };
-
-  if (appState === "welcome") {
+  if (authLoading) {
     return (
-      <div className="flex flex-col min-h-screen bg-bg">
-        <Header onReset={handleReset} />
-        <WelcomeScreen onSubmit={handleInitialSubmit} isLoading={isLoading} />
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--bg)",
+          color: "var(--text-muted)",
+        }}
+      >
+        로딩 중...
       </div>
     );
   }
 
-  if (appState === "confirmed") {
-    return (
-      <div className="flex flex-col min-h-screen bg-bg">
-        <Header onReset={handleReset} />
-        <div className="flex-1 overflow-y-auto px-4 py-8">
-          <div className="max-w-3xl mx-auto space-y-6">
-            <div className="text-center space-y-2">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-green-100 text-green-600">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-bold text-text">선곡이 확정되었습니다</h2>
-              <p className="text-sm text-text-secondary">아래 URL을 복사하여 찬양팀원들에게 공유하세요</p>
-            </div>
-
-            <div className="flex items-center gap-2 p-3 rounded-xl border border-border bg-bg-card">
-              <input
-                type="text"
-                readOnly
-                value={`${typeof window !== "undefined" ? window.location.origin : ""}/setlist/${setlistId}`}
-                className="flex-1 text-sm text-text-secondary bg-transparent focus:outline-none"
-              />
-              <button
-                onClick={() => {
-                  navigator.clipboard?.writeText(`${window.location.origin}/setlist/${setlistId}`);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-dark transition-colors"
-              >
-                {copied ? "복사됨" : "복사"}
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {songs.map((song, i) => (
-                <SongCard key={song.id} song={song} index={i} isConfirmed />
-              ))}
-            </div>
-
-            <button
-              onClick={handleReset}
-              className="w-full py-3 rounded-xl border border-border text-text-secondary font-medium hover:bg-bg-card transition-colors"
-            >
-              새 선곡 시작하기
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  if (!user) {
+    if (typeof window !== "undefined") window.location.href = "/login";
+    return null;
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-bg">
-      <Header onReset={handleReset} />
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-3xl mx-auto">
-          {messages.map((msg) => (
-            <div key={msg.id}>
-              <ChatMessage role={msg.role}>{msg.content}</ChatMessage>
-              {msg.songs && (
-                <div className="space-y-3 mb-4">
-                  {msg.songs.map((song, i) => (
-                    <SongCard
-                      key={song.id}
-                      song={song}
-                      index={i}
-                      onSwapRequest={handleSwapRequest}
-                    />
-                  ))}
+    <div style={{ display: "flex", height: "100vh", background: "var(--bg)" }}>
+      <Sidebar
+        user={user}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
+        onDeleteSession={handleDeleteSession}
+      />
+
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <Header onReset={handleNewSession} />
+
+        {appState === "welcome" && (
+          <WelcomeScreen onSubmit={handleInitialSubmit} isLoading={isLoading} />
+        )}
+
+        {appState === "confirmed" && (
+          <div className="flex-1 overflow-y-auto px-4 py-8">
+            <div className="max-w-3xl mx-auto space-y-6">
+              <div className="text-center space-y-2">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-green-100 text-green-600">
+                  <svg
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
                 </div>
-              )}
+                <h2 className="text-xl font-bold text-text">
+                  선곡이 확정되었습니다
+                </h2>
+                <p className="text-sm text-text-secondary">
+                  아래 URL을 복사하여 찬양팀원들에게 공유하세요
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 p-3 rounded-xl border border-border bg-bg-card">
+                <input
+                  type="text"
+                  readOnly
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/setlist/${setlistId}`}
+                  className="flex-1 text-sm text-text-secondary bg-transparent focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard?.writeText(
+                      `${window.location.origin}/setlist/${setlistId}`
+                    );
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-dark transition-colors"
+                >
+                  {copied ? "복사됨" : "복사"}
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {songs.map((song, i) => (
+                  <SongCard key={song.id} song={song} index={i} isConfirmed />
+                ))}
+              </div>
+
+              <button
+                onClick={handleNewSession}
+                className="w-full py-3 rounded-xl border border-border text-text-secondary font-medium hover:bg-bg-card transition-colors"
+              >
+                새 선곡 시작하기
+              </button>
             </div>
-          ))}
-          {isLoading && (
-            <ChatMessage role="assistant">
-              <span className="inline-flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.15s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.3s]" />
-              </span>
-            </ChatMessage>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-      </div>
-
-      {songs.length > 0 && !isLoading && (
-        <div className="border-t border-border bg-bg px-4 py-3">
-          <div className="max-w-3xl mx-auto">
-            <button
-              onClick={handleConfirm}
-              className="w-full py-3 rounded-xl bg-primary text-white font-medium hover:bg-primary-dark transition-colors"
-            >
-              이 곡 목록으로 확정하기
-            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      <ChatInput onSend={handleChatSend} disabled={isLoading} />
+        {appState === "chat" && (
+          <>
+            <div className="flex-1 overflow-y-auto px-4 py-6">
+              <div className="max-w-3xl mx-auto">
+                {messages.map((msg) => (
+                  <div key={msg.id}>
+                    <ChatMessage role={msg.role}>{msg.content}</ChatMessage>
+                    {msg.songs && (
+                      <div className="space-y-3 mb-4">
+                        {msg.songs.map((song, i) => (
+                          <SongCard
+                            key={song.id}
+                            song={song}
+                            index={i}
+                            onSwapRequest={handleSwapRequest}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {isLoading && (
+                  <ChatMessage role="assistant">
+                    <span className="inline-flex gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.15s]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.3s]" />
+                    </span>
+                  </ChatMessage>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+            </div>
+
+            {songs.length > 0 && !isLoading && (
+              <div className="border-t border-border bg-bg px-4 py-3">
+                <div className="max-w-3xl mx-auto">
+                  <button
+                    onClick={handleConfirm}
+                    className="w-full py-3 rounded-xl bg-primary text-white font-medium hover:bg-primary-dark transition-colors"
+                  >
+                    이 곡 목록으로 확정하기
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <ChatInput onSend={handleChatSend} disabled={isLoading} />
+          </>
+        )}
+      </main>
     </div>
   );
 }
@@ -315,9 +526,21 @@ function Header({ onReset }: { onReset: () => void }) {
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/80 backdrop-blur-sm">
       <div className="max-w-3xl mx-auto flex items-center justify-between px-4 h-14">
-        <button onClick={onReset} className="flex items-center gap-2 text-text hover:text-primary transition-colors">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+        <button
+          onClick={onReset}
+          className="flex items-center gap-2 text-text hover:text-primary transition-colors"
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
           </svg>
           <span className="font-semibold text-sm">STLC 찬양</span>
         </button>
