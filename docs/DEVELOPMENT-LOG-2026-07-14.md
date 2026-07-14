@@ -1,13 +1,13 @@
-# STLC 찬양 선곡 도우미 — 개발 기록 (Day 2)
+# STLC 찬양 선곡 도우미 — 개발 기록 (Day 2~3)
 
-**날짜:** 2026년 7월 14일  
+**날짜:** 2026년 7월 14~15일  
 **이전 기록:** [DEVELOPMENT-LOG-2026-07-13.md](./DEVELOPMENT-LOG-2026-07-13.md)  
 **배포 URL:** https://stlc-praise.vercel.app  
 **GitHub:** https://github.com/gracesvibecode/stlc-praise
 
 ---
 
-## 1. 오늘 개발 요약
+## 1. 개발 요약
 
 Day 1(7/13)의 기본 추천 기능 위에 다음을 추가 구현:
 
@@ -20,6 +20,8 @@ Day 1(7/13)의 기본 추천 기능 위에 다음을 추가 구현:
 | AI 기반 세션 제목 자동 생성 | 완료 |
 | Swagger UI API 문서화 | 완료 |
 | 곡 데이터베이스 시드 데이터 (20곡) | 완료 |
+| 모바일 반응형 사이드바 (접이식 drawer) | 완료 |
+| 프로덕션 Google OAuth 배포 설정 | 완료 |
 
 ---
 
@@ -214,12 +216,49 @@ npx tsx --env-file=.env.local scripts/seed-songs.ts
 
 ---
 
+### 2.8 모바일 반응형 사이드바
+
+모바일(768px 미만)에서 사이드바가 화면을 차지하는 문제를 해결하기 위해 접이식(drawer) UI 적용.
+
+**동작:**
+- **모바일 (< 768px):** 사이드바 기본 숨김 → 헤더 왼쪽 햄버거 버튼(☰)으로 슬라이드 오픈 → 반투명 오버레이 배경 → 오버레이 터치 또는 세션 선택/새 상담 시 자동 닫힘
+- **데스크톱 (≥ 768px):** 기존처럼 사이드바 항상 표시, 햄버거 버튼도 표시되지만 토글 가능
+
+**구현:**
+| 파일 | 변경 내용 |
+|------|----------|
+| `src/components/Sidebar.tsx` | `isOpen`/`onToggle` props 추가, fixed position + CSS transition, 오버레이 배경, 모바일 자동 닫힘 |
+| `src/app/page.tsx` | `sidebarOpen` 상태 추가, Header에 `onToggleSidebar` 전달, 햄버거 메뉴 버튼 추가 |
+| `src/app/globals.css` | `@media (min-width: 768px)` — 데스크톱에서 오버레이 숨김 + aside position 오버라이드 |
+
+---
+
+### 2.9 프로덕션 Google OAuth 배포
+
+프로덕션 환경(Vercel)에서 Google 로그인이 작동하도록 설정.
+
+**완료된 설정:**
+| 항목 | 내용 |
+|------|------|
+| Google OAuth consent screen 게시 | Testing → Production (Google Cloud Console → OAuth consent screen → Publish App) |
+| Supabase Site URL | `https://stlc-praise.vercel.app` 으로 변경 |
+| Supabase Redirect URLs | `https://stlc-praise.vercel.app/auth/callback` 추가 |
+
+**해결한 이슈:**
+| 이슈 | 원인 | 해결 |
+|------|------|------|
+| "액세스 차단됨" (보안 정책 미준수) | OAuth consent screen이 "테스트" 상태 | 앱 게시(Publish)로 전환 |
+| "403: disallowed-useragent" | 카카오톡 등 앱 내장 브라우저(WebView)에서 접속 | Chrome/Safari 등 일반 브라우저에서 접속 안내 |
+
+---
+
 ## 3. 변경된 파일 구조 (Day 1 대비 추가분)
 
 ```
 src/
 ├── app/
-│   ├── page.tsx             # [변경] auth 상태, 세션 관리, 사이드바 통합
+│   ├── globals.css           # [변경] 모바일 사이드바 미디어쿼리 추가
+│   ├── page.tsx             # [변경] auth 상태, 세션 관리, 사이드바 통합, 모바일 토글
 │   ├── login/page.tsx       # [추가] Google OAuth 로그인 페이지
 │   ├── auth/
 │   │   └── callback/route.ts # [추가] OAuth 콜백 핸들러
@@ -237,7 +276,7 @@ src/
 │               └── messages/
 │                   └── route.ts # [추가] 메시지 조회/저장
 ├── components/
-│   └── Sidebar.tsx          # [추가] 세션 사이드바
+│   └── Sidebar.tsx          # [추가] 세션 사이드바 (접이식 drawer 지원)
 ├── lib/
 │   ├── gemini.ts            # [변경] RAG 컨텍스트 파라미터, generateTitle 추가
 │   ├── rag.ts               # [추가] RAG 핵심 라이브러리
@@ -283,14 +322,10 @@ scripts/
 
 ## 6. Future Work (우선순위순)
 
-### 6.1 프로덕션 배포 준비 (높음)
-- Vercel 환경변수에 새 변수들 반영 확인
-- Google OAuth Redirect URL에 프로덕션 도메인 추가
-  - Supabase URL Configuration → Redirect URLs에 `https://stlc-praise.vercel.app/auth/callback` 추가
-  - Google Cloud Console → OAuth 2.0 Client → Authorized redirect URIs에 Supabase 콜백 URL 유지
-- Google OAuth consent screen "외부" → 다른 팀원 로그인을 위해 **앱 게시**(publish) 필요
-  - 현재 "테스트" 상태 → 등록된 테스트 사용자만 로그인 가능
-  - 게시하면 Google 검증 없이도 100명까지 사용 가능
+### ~~6.1 프로덕션 배포 준비~~ (완료)
+- ~~Supabase URL Configuration 설정 (Site URL + Redirect URL)~~
+- ~~Google OAuth consent screen 앱 게시(Publish)~~
+- 앱 내장 브라우저(WebView)에서는 Google OAuth가 차단됨 — 일반 브라우저 사용 필요
 
 ### 6.2 곡 데이터베이스 관리 UI (높음)
 - 관리자 페이지에서 곡 추가/수정/삭제 UI
@@ -333,8 +368,9 @@ scripts/
 |------|------|------|
 | Google Custom Search API 403 | 미해결 | Day 1에서 이어진 이슈. 팝업 방식으로 대체 중 |
 | Gemini 503 간헐 발생 | 완화됨 | callWithFallback + retry로 대응 |
-| Google OAuth "테스트" 상태 | 알려짐 | 등록된 테스트 사용자만 로그인 가능. 앱 게시(publish) 필요 |
-| 프로덕션 OAuth 리다이렉트 미설정 | 미완료 | Vercel 배포 시 Redirect URL 추가 필요 |
+| ~~Google OAuth "테스트" 상태~~ | **해결** | 앱 게시(Publish) 완료 |
+| ~~프로덕션 OAuth 리다이렉트 미설정~~ | **해결** | Supabase Site URL + Redirect URL 설정 완료 |
+| WebView에서 Google OAuth 차단 | 알려짐 | 앱 내장 브라우저(카카오톡 등)에서 "403: disallowed-useragent" 에러. 일반 브라우저 사용 필요 |
 
 ---
 

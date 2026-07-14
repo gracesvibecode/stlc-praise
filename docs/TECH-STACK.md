@@ -1,6 +1,6 @@
 # STLC 찬양 선곡 도우미 — 기술 스택 명세
 
-**최종 업데이트:** 2026년 7월 14일
+**최종 업데이트:** 2026년 7월 15일
 
 ---
 
@@ -233,7 +233,8 @@ PUBLIC_PATHS = ["/login", "/auth/callback", "/api/openapi", "/docs"]
 | Client ID / Secret | Google Cloud Console → OAuth 2.0 Client |
 | Provider 설정 | Supabase Dashboard → Auth → Providers → Google |
 | Site URL | Supabase Dashboard → Auth → URL Configuration |
-| Redirect URLs | `http://localhost:3000/auth/callback` (dev) |
+| Redirect URLs | `http://localhost:3000/auth/callback` (dev), `https://stlc-praise.vercel.app/auth/callback` (prod) |
+| Publishing status | Production (게시 완료) |
 | OAuth consent screen | Google Cloud Console → APIs & Services |
 
 ---
@@ -384,13 +385,20 @@ PUBLIC_PATHS = ["/login", "/auth/callback", "/api/openapi", "/docs"]
 
 ```
 page.tsx (메인 — 상태 머신 + 세션 관리)
-├── Sidebar             # 세션 목록, 새 상담, 로그아웃
-├── Header              # 상단 네비게이션 (인라인 컴포넌트)
+├── Sidebar             # 세션 목록, 새 상담, 로그아웃 (모바일: 접이식 drawer)
+├── Header              # 상단 네비게이션 + 햄버거 메뉴 (인라인 컴포넌트)
 ├── WelcomeScreen       # 시작 화면 (프롬프트, 예시 칩, 곡 수 선택)
 ├── ChatMessage         # 메시지 버블 (user: 우측 / assistant: 좌측)
 ├── SongCard            # 곡 정보 카드 (악보 보기, 교체 버튼)
 └── ChatInput           # 채팅 입력 필드 + 전송 버튼
 ```
+
+### 반응형 디자인
+
+| 뷰포트 | 사이드바 동작 |
+|--------|-------------|
+| 모바일 (< 768px) | 기본 숨김, 햄버거 버튼으로 슬라이드 오픈, 오버레이 배경, 자동 닫힘 |
+| 데스크톱 (≥ 768px) | 항상 표시 (280px 고정), CSS `position: relative` 오버라이드 |
 
 ### 상태 관리
 
@@ -400,6 +408,7 @@ page.tsx (메인 — 상태 머신 + 세션 관리)
 |------|------|------|
 | `user` | `User \| null` | 인증된 사용자 정보 |
 | `authLoading` | `boolean` | 인증 확인 중 |
+| `sidebarOpen` | `boolean` | 모바일 사이드바 열림 상태 |
 | `sessions` | `Session[]` | 사이드바 세션 목록 |
 | `currentSessionId` | `string \| null` | 현재 활성 세션 ID |
 | `appState` | `"welcome" \| "chat" \| "confirmed"` | 화면 전환 |
