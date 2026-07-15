@@ -1,15 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { notFound } from "next/navigation";
-
-interface Song {
-  title: string;
-  composer: string;
-  key: string;
-  bpm: number;
-  tempo: string;
-  styles: string[];
-  reason: string;
-}
+import SongCard, { type Song } from "@/components/SongCard";
 
 export default async function SetlistPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -22,7 +13,10 @@ export default async function SetlistPage({ params }: { params: Promise<{ id: st
 
   if (!data) notFound();
 
-  const songs = data.songs as Song[];
+  const songs = (data.songs as Song[]).map((s, i) => ({
+    ...s,
+    id: s.id || String(i),
+  }));
   const createdAt = new Date(data.created_at).toLocaleDateString("ko-KR", {
     year: "numeric",
     month: "long",
@@ -51,26 +45,8 @@ export default async function SetlistPage({ params }: { params: Promise<{ id: st
         </div>
 
         <div className="space-y-3">
-          {songs.map((song: Song, i: number) => (
-            <div key={i} className="rounded-xl border border-border bg-bg-card p-4">
-              <div className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-primary-50 text-primary text-sm font-bold flex items-center justify-center">
-                  {i + 1}
-                </span>
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-text">{song.title}</h3>
-                  <p className="text-sm text-text-secondary mt-0.5">{song.composer}</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5 mt-3">
-                <span className="px-2 py-0.5 text-xs rounded-md bg-primary-50 text-primary font-medium">{song.key}</span>
-                <span className="px-2 py-0.5 text-xs rounded-md bg-primary-50 text-primary font-medium">{song.bpm} BPM · {song.tempo}</span>
-                {song.styles.map((style: string) => (
-                  <span key={style} className="px-2 py-0.5 text-xs rounded-md border border-border text-text-muted">{style}</span>
-                ))}
-              </div>
-              <p className="mt-3 text-sm text-text-secondary leading-relaxed">{song.reason}</p>
-            </div>
+          {songs.map((song, i) => (
+            <SongCard key={song.id} song={song} index={i} isConfirmed />
           ))}
         </div>
       </main>
