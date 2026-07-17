@@ -188,8 +188,9 @@ export default function Home() {
     if (currentSessionId === sessionId) handleNewSession();
   };
 
-  const ensureSession = async (prompt: string): Promise<string> => {
+  const ensureSession = async (prompt: string): Promise<string | null> => {
     if (currentSessionId) return currentSessionId;
+    if (!user) return null;
 
     const shortTitle = prompt.length > 30 ? prompt.slice(0, 30) + "..." : prompt;
 
@@ -223,7 +224,7 @@ export default function Home() {
     try {
       const sessionId = await ensureSession(prompt);
 
-      await saveMessage(sessionId, "user", userContent);
+      if (sessionId) await saveMessage(sessionId, "user", userContent);
 
       const res = await fetch("/api/recommend", {
         method: "POST",
@@ -246,7 +247,7 @@ export default function Home() {
       };
       setMessages((prev) => [...prev, aiMsg]);
 
-      await saveMessage(sessionId, "assistant", aiContent, recommended);
+      if (sessionId) await saveMessage(sessionId, "assistant", aiContent, recommended);
     } catch {
       const errMsg: Message = {
         id: crypto.randomUUID(),
@@ -382,11 +383,6 @@ export default function Home() {
         로딩 중...
       </div>
     );
-  }
-
-  if (!user) {
-    if (typeof window !== "undefined") window.location.href = "/login";
-    return null;
   }
 
   return (
